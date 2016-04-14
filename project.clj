@@ -12,10 +12,14 @@
                  [postgresql "9.3-1102.jdbc41"]
                  [reloaded.repl "0.2.1"]
                  [heroku-database-url-to-jdbc "0.2.2"]
-                 [org.clojure/data.json "0.2.6"]]
+                 [org.clojure/data.json "0.2.6"]
+                 [clojurewerkz/spyglass "1.1.0-beta3"]
+                 [org.clojure/data.codec "0.1.0"]
+                 [manifold "0.1.4"]]
   :main ^:skip-aot cairborne.core
   :plugins [[lein-environ "1.0.2"]]
   :target-path "target/%s"
   :profiles {:dev {:source-paths ["dev"]}
              :uberjar {:aot :all}}
-  :env {:database-url "postgres://postgres@lf:5432/airborne"})
+  :env {:database-url "postgres://postgres@lf:5432/airborne"
+        :memcached-url "127.0.0.1:11211"})

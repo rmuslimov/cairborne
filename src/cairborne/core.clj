@@ -5,9 +5,12 @@
             [com.stuartsierra.component :as cmp]
             [environ.core :refer [env]]
             [heroku-database-url-to-jdbc.core :refer [korma-connection-map]]
+            [clojurewerkz.spyglass.client :as c]
+            [clojure.data.codec.base64 :as b64]
             [korma
              [core :as k]
-             [db :as kd]]))
+             [db :as kd]]
+            [manifold.deferred :as d]))
 
 (defn main-system
   "Whole system here."
@@ -27,6 +30,10 @@
 (defn gen-cache-key
   [entity-id subsystem]
   (keyword (format "hyatt_entity_%s_%s" entity-id subsystem)))
+
+(defn gen-blob-key
+  [id]
+  (keyword (format "hyatt_blob_value_%s" id)))
 
 (defn merge-configs
   "Return merged config basedefault on parents and common."
@@ -65,19 +72,69 @@
                    #(or (some-> % json/read-str walk/keywordize-keys) {})))
           rows))))
 
+(defn config-to-keys
+  ""
+  [entity-id config]
+  (apply hash-map
+         (mapcat
+          identity
+          (for [sys #{:aft :cbt :common :mobile}]
+            (list (name (gen-cache-key entity-id (name sys)))
+                  (get config sys))))))
+
 (defn set-cache!
   "Put processed rows to memcached."
   [& rows]
-  (let [blobs (k/select blobs)]
-    (flatten
-     (for [{id :id c :calc} rows]
-       (map (fn [[sub v]] [(gen-cache-key id (name sub)) (json/write-str v)]) @c))
-     )))
+  (let [tmc (c/bin-connection (env :memcached-url))]
+    (doseq [[id {calc :calc :as row}] rows]
+      (let [pairs (config-to-keys id @calc)]
+        (doseq [[k v] pairs]
+          (c/set tmc k 3000 (json/write-str v)))))))
 
-;; (time (def data (-> (get-companies) (put-delays))))
-;; (time (count (doall (for [[id e] data] [id @(:calc e)]))))
-;; (time (apply hash-map (set-cache! (get data 41876) (get data 41875))))
-;; @(:calc (get data 48605))
+(defn encode-django-binary
+  "Django uses binary field let's encode them."
+  [{v :value :as row}]
+  (let [newv
+        (when v
+          (let [vstr (String. v)]
+            (try
+              (json/read-str vstr)
+              (catch Exception vstr))))]
+    (assoc row :value newv)))
+
+(defn set-blobs!
+  []
+  (let [tmc (c/bin-connection (env :memcached-url))
+        blobs (map encode-django-binary (k/select blobs))]
+    (doseq [{:keys [id value]} blobs]
+      (when value
+        (c/set tmc (name (gen-blob-key id)) 3000 (json/write-str value))))))
+
+(defn apply-set-cache!
+  "Just put data to cache in parallel threads."
+  [data]
+  (apply d/zip
+         (for [chunk (partition-all 1e3 data)]
+           (future (apply set-cache! chunk)))))
+
+(defn rebuild-hyatt-fast
+  []
+  (d/zip
+   (future (set-blobs!))
+   (d/chain
+    (-> (get-companies) (put-delays))
+    apply-set-cache!)))
+
+;; (time (def tree (-> (get-companies) (put-delays))))
+;; (time (set-blobs!))
+;; (time (apply-set-cache! tree))
+;; (map encode-django-binary (k/select blobs (k/where {:id 1154})))
+
+;; Call rebuild hyatt process
+;; (time @(rebuild-hyatt-fast))
+;; "Elapsed time: 1437.536992 msecs"
+;; "Elapsed time: 1406.571521 msecs"
+;; "Elapsed time: 1267.539232 msecs"
 
 (defn -main
   [& args]
