@@ -6,7 +6,7 @@
   :dependencies [[com.stuartsierra/component "0.3.1"]
                  [environ "1.0.2"]
                  [korma "0.4.2"]
-                 [org.clojure/clojure "1.7.0"]
+                 [org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.nrepl "0.2.11"]
                  [org.danielsz/system "0.2.1-SNAPSHOT"]
                  [postgresql "9.3-1102.jdbc41"]

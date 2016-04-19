@@ -1,16 +1,23 @@
 (ns cairborne.core
   (:gen-class)
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.walk :as walk]
+            [clojurewerkz.spyglass.client :as c]
             [com.stuartsierra.component :as cmp]
             [environ.core :refer [env]]
             [heroku-database-url-to-jdbc.core :refer [korma-connection-map]]
-            [clojurewerkz.spyglass.client :as c]
-            [clojure.data.codec.base64 :as b64]
             [korma
              [core :as k]
              [db :as kd]]
             [manifold.deferred :as d]))
+
+(def defaults
+  (let [conf (->> "defaults.json" io/resource slurp json/read-str
+                  (into {}) walk/keywordize-keys)]
+    (zipmap #{:aft :cbt :common :mobile} (repeat 4 conf))))
+
+(def default-ttl default-ttl)
 
 (defn main-system
   "Whole system here."
@@ -54,8 +61,9 @@
           (delay
            (if-not
                parent-id (merge-configs {} c)
-               (merge-configs @(-> @p (get parent-id) :calc) c))))]
-    (deliver p (zipmap (keys rows) (map #(assoc % :calc (calc %)) (vals rows))))
+               (merge-configs @(-> @p (get parent-id) :calc) c))))
+        result (zipmap (keys rows) (map #(assoc % :calc (calc %)) (vals rows)))]
+    (deliver p result)
     @p))
 
 (defn get-companies
@@ -82,15 +90,6 @@
             (list (name (gen-cache-key entity-id (name sys)))
                   (get config sys))))))
 
-(defn set-cache!
-  "Put processed rows to memcached."
-  [& rows]
-  (let [tmc (c/bin-connection (env :memcached-url))]
-    (doseq [[id {calc :calc :as row}] rows]
-      (let [pairs (config-to-keys id @calc)]
-        (doseq [[k v] pairs]
-          (c/set tmc k 3000 (json/write-str v)))))))
-
 (defn encode-django-binary
   "Django uses binary field let's encode them."
   [{v :value :as row}]
@@ -102,13 +101,14 @@
               (catch Exception vstr))))]
     (assoc row :value newv)))
 
-(defn set-blobs!
-  []
-  (let [tmc (c/bin-connection (env :memcached-url))
-        blobs (map encode-django-binary (k/select blobs))]
-    (doseq [{:keys [id value]} blobs]
-      (when value
-        (c/set tmc (name (gen-blob-key id)) 3000 (json/write-str value))))))
+(defn set-cache!
+  "Put processed rows to memcached."
+  [& rows]
+  (let [tmc (c/bin-connection (env :memcached-url))]
+    (doseq [[id {calc :calc :as row}] rows]
+      (for [[k v] (config-to-keys id @calc)]
+        (c/set tmc k default-ttl (json/write-str v))))
+    (c/shutdown tmc)))
 
 (defn apply-set-cache!
   "Just put data to cache in parallel threads."
@@ -126,15 +126,21 @@
     apply-set-cache!)))
 
 ;; (time (def tree (-> (get-companies) (put-delays))))
+;; @(get-in tree [6 :calc])
 ;; (time (set-blobs!))
 ;; (time (apply-set-cache! tree))
 ;; (map encode-django-binary (k/select blobs (k/where {:id 1154})))
 
-;; Call rebuild hyatt process
 ;; (time @(rebuild-hyatt-fast))
-;; "Elapsed time: 1437.536992 msecs"
-;; "Elapsed time: 1406.571521 msecs"
-;; "Elapsed time: 1267.539232 msecs"
+
+
+(defn set-blobs!
+  []
+  (let [tmc (c/bin-connection (env :memcached-url))
+        blobs (map encode-django-binary (k/select blobs))]
+    (doseq [{:keys [id value]} blobs]
+      (when value
+        (c/set tmc (name (gen-blob-key id)) default-ttl (json/write-str value))))))
 
 (defn -main
   [& args]
