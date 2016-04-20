@@ -1,0 +1,3 @@
+"Elapsed time: 23463.544231 msecs"
+"Elapsed time: 22190.168821 msecs"
+"Elapsed time: 21778.109532 msecs"

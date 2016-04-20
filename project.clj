@@ -4,6 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[com.stuartsierra/component "0.3.1"]
+                 [cider/cider-nrepl "0.12.0"]
                  [environ "1.0.2"]
                  [korma "0.4.2"]
                  [org.clojure/clojure "1.8.0"]
@@ -15,6 +16,7 @@
                  [org.clojure/data.json "0.2.6"]
                  [clojurewerkz/spyglass "1.1.0-beta3"]
                  [org.clojure/data.codec "0.1.0"]
+                 [org.clojure/tools.nrepl "0.2.11"]
                  [manifold "0.1.4"]]
   :main ^:skip-aot cairborne.core
   :plugins [[lein-environ "1.0.2"]]
@@ -22,4 +24,5 @@
   :profiles {:dev {:source-paths ["dev"]}
              :uberjar {:aot :all}}
   :env {:database-url "postgres://postgres@lf:5432/airborne"
-        :memcached-url "127.0.0.1:11211"})
+        :memcached-url "127.0.0.1:11211"
+        :nrepl-port "7802"})

@@ -1,6 +1,8 @@
 (ns cairborne.core
   (:gen-class)
   (:require [clojure.data.json :as json]
+            [cider.nrepl :refer (cider-nrepl-handler)]
+            [clojure.tools.nrepl [server :as nrepl-server]]
             [clojure.java.io :as io]
             [clojure.walk :as walk]
             [clojurewerkz.spyglass.client :as c]
@@ -12,12 +14,23 @@
              [db :as kd]]
             [manifold.deferred :as d]))
 
+
+(defn encode
+  ""
+  [value]
+  (bytes (byte-array (map byte value))))
+
+(defn decode
+  ""
+  [val]
+  (String. val))
+
 (def defaults
   (let [conf (->> "defaults.json" io/resource slurp json/read-str
                   (into {}) walk/keywordize-keys)]
     (zipmap #{:aft :cbt :common :mobile} (repeat 4 conf))))
 
-(def default-ttl default-ttl)
+(def default-ttl 3000)
 
 (defn main-system
   "Whole system here."
@@ -104,9 +117,9 @@
 (defn set-cache!
   "Put processed rows to memcached."
   [& rows]
-  (let [tmc (c/bin-connection (env :memcached-url))]
+  (let [tmc (c/text-connection (env :memcached-url))]
     (doseq [[id {calc :calc :as row}] rows]
-      (for [[k v] (config-to-keys id @calc)]
+      (doseq [[k v] (config-to-keys id @calc)]
         (c/set tmc k default-ttl (json/write-str v))))
     (c/shutdown tmc)))
 
@@ -114,8 +127,17 @@
   "Just put data to cache in parallel threads."
   [data]
   (apply d/zip
-         (for [chunk (partition-all 1e3 data)]
-           (future (apply set-cache! chunk)))))
+         (for [chunk (partition-all 1e4 data)]
+           (d/future (apply set-cache! chunk)))))
+
+(defn set-blobs!
+  []
+  (let [tmc (c/text-connection (env :memcached-url))
+        blobs (map encode-django-binary (k/select blobs))]
+    (doseq [{:keys [id value]} blobs]
+      (when value
+        (c/set tmc (name (gen-blob-key id)) default-ttl (json/write-str value))))
+    (c/shutdown tmc)))
 
 (defn rebuild-hyatt-fast
   []
@@ -125,23 +147,20 @@
     (-> (get-companies) (put-delays))
     apply-set-cache!)))
 
+;; (set-cache! micro)
 ;; (time (def tree (-> (get-companies) (put-delays))))
-;; @(get-in tree [6 :calc])
+;; @(get-in tree [31 :calc])
 ;; (time (set-blobs!))
-;; (time (apply-set-cache! tree))
+;; (time @(apply-set-cache! tree))
 ;; (map encode-django-binary (k/select blobs (k/where {:id 1154})))
+;; (count (get-companies))
 
 ;; (time @(rebuild-hyatt-fast))
 
-
-(defn set-blobs!
-  []
-  (let [tmc (c/bin-connection (env :memcached-url))
-        blobs (map encode-django-binary (k/select blobs))]
-    (doseq [{:keys [id value]} blobs]
-      (when value
-        (c/set tmc (name (gen-blob-key id)) default-ttl (json/write-str value))))))
-
 (defn -main
   [& args]
-  "Nothing so far.")
+  "Rebuild hyatt and exit."
+  (println (env :nrepl-port))
+  (nrepl-server/start-server
+   :bind "0.0.0.0" :port (Integer. (env :nrepl-port)) :handler cider-nrepl-handler)
+  (println "Started repl."))
