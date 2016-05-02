@@ -1,0 +1,5 @@
+* Clojure version of build hyatt fast
+
+To execute hyatt build fast:
+- Start REPL
+- Execute `rebuild-hyatt-faste`
